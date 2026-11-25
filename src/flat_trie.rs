@@ -7,19 +7,20 @@ pub struct Trie {
 }
 
 impl Trie {
+    /// build a trie from paths
     pub fn new(mut paths: Vec<Vec<&str>>) -> Result<Trie, String> {
         paths.sort();
 
         let mut dictionary: String = String::new();
         let mut dictionary_lookup: Vec<u32> = vec![0];
-        let mut offset: Vec<u32> = vec![0];
+        let mut offset: Vec<u32> = vec![1];
 
         //processing queue for nodes in the trie
         let mut children: VecDeque<(usize, Range<usize>)> = VecDeque::new();
 
         //push the root node to the queue
         children.push_back((0, (0..paths.len())));
-        let mut total_children: usize = 0;
+        let mut total_children: usize = 1;
 
         while !children.is_empty() {
             let (child_depth, child_range) = children.pop_front().unwrap();
@@ -62,6 +63,24 @@ impl Trie {
         })
     }
 
+    /**
+     * get the index of the child of `parent_node` with a label equal to `child label`
+     */
+    pub fn get_child_index(&self, parent_node: u32, child_label: &str) -> Option<u32> {
+        ((self.offset[parent_node as usize])..self.offset[(parent_node + 1) as usize]).find_map(
+            |i| {
+                if (self.dictionary[(self.dictionary_lookup[i as usize] as usize)
+                    ..(self.dictionary_lookup[(i + 1) as usize] as usize)])
+                    .eq(child_label)
+                {
+                    Some(i)
+                } else {
+                    None
+                }
+            },
+        )
+    }
+
     #[inline(always)]
     fn get_label(&self, index: u32) -> &str {
         return &self.dictionary[(self.dictionary_lookup[index as usize] as usize)
@@ -78,7 +97,7 @@ impl Trie {
 
         let mut ahead_results: Vec<(Vec<String>, String)> = Vec::new();
         for i in start..end {
-            ahead_results.push(self.recurse_tree_lines((i + 1) as usize)?);
+            ahead_results.push(self.recurse_tree_lines((i) as usize)?);
         }
 
         let this_prefix: String = format!("{}", self.get_label(index as u32));
@@ -143,5 +162,82 @@ impl ToString for Trie {
 impl std::fmt::Debug for Trie {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Trie;
+
+    const ROOT: u32 = 0;
+
+    #[test]
+    fn empty_trie_has_no_children() {
+        let trie = Trie::new(vec![]).unwrap();
+
+        assert_eq!(trie.get_child_index(ROOT, "a"), None);
+        assert_eq!(trie.to_string(), "");
+    }
+
+    #[test]
+    fn traverses_a_wide_and_deep_trie() {
+        let paths = vec![
+            vec!["returns", "item", "reason"],
+            vec!["orders", "shipping", "address", "postcode"],
+            vec!["catalog", "book", "title"],
+            vec!["orders", "item", "price", "amount"],
+            vec!["orders", "item", "quantity"],
+            vec!["orders", "payment", "method"],
+        ];
+        let trie = Trie::new(paths.clone()).unwrap();
+
+        for path in &paths {
+            let mut parent = ROOT;
+            for (depth, &label) in path.iter().enumerate() {
+                parent = trie
+                    .get_child_index(parent, label)
+                    .unwrap_or_else(|| panic!("missing path /{}", path[..=depth].join("/")));
+            }
+        }
+
+        let orders = trie.get_child_index(ROOT, "orders").unwrap();
+        let item = trie.get_child_index(orders, "item").unwrap();
+        assert_eq!(trie.get_child_index(item, "reason"), None);
+    }
+
+    #[test]
+    fn finds_root_children_by_label() {
+        let trie = Trie::new(vec![vec!["apple"], vec!["beta"]]).unwrap();
+
+        assert_eq!(trie.get_child_index(ROOT, "missing"), None);
+
+        let apple = trie.get_child_index(ROOT, "apple").expect("apple child");
+        let beta = trie.get_child_index(ROOT, "beta").expect("beta child");
+
+        assert_ne!(apple, beta);
+    }
+
+    #[test]
+    fn rejects_a_prefix_of_a_child_label() {
+        let trie = Trie::new(vec![vec!["apple"]]).unwrap();
+
+        assert_eq!(trie.get_child_index(ROOT, "app"), None);
+    }
+
+    #[test]
+    fn rejects_a_label_spanning_adjacent_dictionary_entries() {
+        let trie = Trie::new(vec![vec!["a"], vec!["b"]]).unwrap();
+
+        assert_eq!(trie.get_child_index(ROOT, "ab"), None);
+    }
+
+    #[test]
+    fn uses_returned_child_ids_to_walk_a_path() {
+        let trie = Trie::new(vec![vec!["a", "b"]]).unwrap();
+
+        let a = trie.get_child_index(ROOT, "a").expect("root child a");
+        let b = trie.get_child_index(a, "b").expect("child b under a");
+
+        assert_eq!(trie.get_child_index(b, "a"), None);
     }
 }
